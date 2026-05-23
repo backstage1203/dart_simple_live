@@ -96,5 +96,5 @@ jobs:
         working-directory: simple_live_app
         run: flutter build apk --debug --split-per-abi --no-pub
 
-      - name: Upload Android APK
-        uses: actions/upload-artifact@v4
+      - name: Collect Android APK
+        run: |
