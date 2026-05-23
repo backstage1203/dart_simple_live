@@ -10,41 +10,30 @@ on:
       build_android_tv:
         description: Build Android TV APK
         type: boolean
-        default: true
+        default: false
       build_windows:
         description: Build Windows portable package
         type: boolean
-        default: true
+        default: false
       build_linux:
         description: Build Linux portable package
         type: boolean
-        default: true
-      build_mode:
-        description: "Build mode"
-        type: choice
-        options:
-          - debug
-          - release
-        default: release
+        default: false
 
 env:
-  FLUTTER_VERSION: "3.38.x"
-  KOTLIN_VERSION: "2.3.21"
+  KOTLIN_VERSION: 2.3.21
 
 jobs:
-  # =========================================================================
-  # Android phone APK
-  # =========================================================================
   android:
     if: ${{ inputs.build_android }}
     name: Android phone APK
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: zulu
           java-version: "17"
@@ -53,7 +42,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: "3.38.x"
           cache: true
 
       - name: Create temporary Android signing files
@@ -77,72 +66,100 @@ jobs:
       - name: Align Android Kotlin version
         run: |
           set -euo pipefail
-          for file in simple_live_app/android/settings.gradle \
-                      simple_live_app/android/settings.gradle.kts \
-                      simple_live_app/android/build.gradle \
-                      simple_live_app/android/build.gradle.kts; do
-            if [ -f "$file" ]; then
-              perl -0pi -e "s/id\$\"org\\.jetbrains\\.kotlin\\.android\"\$\\s+version\\s+\"[^\"]+\"/id(\"org.jetbrains.kotlin.android\") version \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
-              perl -0pi -e "s/id 'org\\.jetbrains\\.kotlin\\.android' version '[^']+'/id 'org.jetbrains.kotlin.android' version '\$ENV{KOTLIN_VERSION}'/g" "$file"
-              perl -0pi -e "s/id \"org\\.jetbrains\\.kotlin\\.android\" version \"[^\"]+\"/id \"org.jetbrains.kotlin.android\" version \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
-              perl -0pi -e "s/ext\\.kotlin_version\\s*=\\s*['\"][^'\"]+['\"]/ext.kotlin_version = \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
-            fi
-          done
-          for file in simple_live_app/android/app/build.gradle \
-                      simple_live_app/android/app/build.gradle.kts; do
-            if [ -f "$file" ]; then
-              perl -0pi -e 's/\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*JavaVersion\.VERSION_11\.toString$$\s*\}//g' "$file"
-              if ! grep -q "org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11" "$file"; then
-                cat >> "$file" <<'EOF'
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          kotlin_version = os.environ["KOTLIN_VERSION"]
+          android_dir = Path("simple_live_app/android")
+
+          for file in [
+              android_dir / "settings.gradle",
+              android_dir / "settings.gradle.kts",
+              android_dir / "build.gradle",
+              android_dir / "build.gradle.kts",
+          ]:
+              if not file.exists():
+                  continue
+              text = file.read_text(encoding="utf-8")
+              text = re.sub(
+                  r'id\("org\.jetbrains\.kotlin\.android"\)\s+version\s+"[^"]+"',
+                  f'id("org.jetbrains.kotlin.android") version "{kotlin_version}"',
+                  text,
+              )
+              text = re.sub(
+                  r'id [\'"]org\.jetbrains\.kotlin\.android[\'"] version [\'"][^\'"]+[\'"]',
+                  f'id "org.jetbrains.kotlin.android" version "{kotlin_version}"',
+                  text,
+              )
+              text = re.sub(
+                  r'ext\.kotlin_version\s*=\s*[\'"][^\'"]+[\'"]',
+                  f'ext.kotlin_version = "{kotlin_version}"',
+                  text,
+              )
+              file.write_text(text, encoding="utf-8")
+
+          for file in [
+              android_dir / "app/build.gradle",
+              android_dir / "app/build.gradle.kts",
+          ]:
+              if not file.exists():
+                  continue
+              text = file.read_text(encoding="utf-8")
+              text = re.sub(
+                  r'\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*JavaVersion\.VERSION_11\.toString\(\)\s*\}',
+                  '',
+                  text,
+                  flags=re.S,
+              )
+              if "org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11" not in text:
+                  text = text.rstrip() + """
 
           kotlin {
               compilerOptions {
                   jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
               }
           }
-          EOF
-              fi
-            fi
-          done
+          """
+              file.write_text(text + "\n", encoding="utf-8")
+          PY
+          echo "Kotlin plugin lines after patch:"
+          grep -RIn "org.jetbrains.kotlin.android\|kotlin_version" simple_live_app/android
+          grep -RIn "org.jetbrains.kotlin.android.*$KOTLIN_VERSION\|kotlin_version.*$KOTLIN_VERSION" simple_live_app/android
+          grep -RIn "kotlinOptions\|compilerOptions\|JvmTarget" simple_live_app/android/app || true
 
       - name: Restore packages
         working-directory: simple_live_app
         run: flutter pub get
 
-      - name: Build APK
+      - name: Build debug APK
         working-directory: simple_live_app
-        run: flutter build apk --${{ inputs.build_mode }} --split-per-abi --no-pub
+        run: flutter build apk --debug --split-per-abi --no-pub
 
-      - name: List APK output
-        if: always()
+      - name: Collect Android APK
         run: |
-          echo "==== flutter-apk dir ===="
-          ls -al simple_live_app/build/app/outputs/flutter-apk/ || true
-          echo "==== find *.apk ===="
-          find simple_live_app/build -name "*.apk" -print
+          mkdir -p artifacts/android-phone
+          cp simple_live_app/build/app/outputs/flutter-apk/*.apk artifacts/android-phone/
+          ls -la artifacts/android-phone
 
       - name: Upload Android APK
-        if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: android-${{ inputs.build_mode }}
-          path: simple_live_app/build/app/outputs/flutter-apk/*.apk
+          name: android-phone-apk
+          path: artifacts/android-phone/
           if-no-files-found: error
-          retention-days: 14
 
-  # =========================================================================
-  # Android TV APK
-  # =========================================================================
-  android_tv:
+  android-tv:
     if: ${{ inputs.build_android_tv }}
     name: Android TV APK
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: zulu
           java-version: "17"
@@ -151,10 +168,10 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: "3.38.x"
           cache: true
 
-      - name: Create temporary Android signing files (TV)
+      - name: Create temporary Android TV signing files
         run: |
           keytool -genkeypair -v \
             -keystore simple_live_tv_app/android/debug.keystore \
@@ -172,44 +189,105 @@ jobs:
             echo "keyAlias=androiddebugkey"
           } > simple_live_tv_app/android/key.properties
 
-      - name: Restore packages (TV)
+      - name: Align Android TV Kotlin version
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          kotlin_version = os.environ["KOTLIN_VERSION"]
+          android_dir = Path("simple_live_tv_app/android")
+
+          for file in [
+              android_dir / "settings.gradle",
+              android_dir / "settings.gradle.kts",
+              android_dir / "build.gradle",
+              android_dir / "build.gradle.kts",
+          ]:
+              if not file.exists():
+                  continue
+              text = file.read_text(encoding="utf-8")
+              text = re.sub(
+                  r'id\("org\.jetbrains\.kotlin\.android"\)\s+version\s+"[^"]+"',
+                  f'id("org.jetbrains.kotlin.android") version "{kotlin_version}"',
+                  text,
+              )
+              text = re.sub(
+                  r'id [\'"]org\.jetbrains\.kotlin\.android[\'"] version [\'"][^\'"]+[\'"]',
+                  f'id "org.jetbrains.kotlin.android" version "{kotlin_version}"',
+                  text,
+              )
+              text = re.sub(
+                  r'ext\.kotlin_version\s*=\s*[\'"][^\'"]+[\'"]',
+                  f'ext.kotlin_version = "{kotlin_version}"',
+                  text,
+              )
+              file.write_text(text, encoding="utf-8")
+
+          for file in [
+              android_dir / "app/build.gradle",
+              android_dir / "app/build.gradle.kts",
+          ]:
+              if not file.exists():
+                  continue
+              text = file.read_text(encoding="utf-8")
+              text = re.sub(
+                  r'\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*JavaVersion\.VERSION_11\.toString\(\)\s*\}',
+                  '',
+                  text,
+                  flags=re.S,
+              )
+              if "org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11" not in text:
+                  text = text.rstrip() + """
+
+          kotlin {
+              compilerOptions {
+                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+              }
+          }
+          """
+              file.write_text(text + "\n", encoding="utf-8")
+          PY
+          echo "Kotlin plugin lines after patch:"
+          grep -RIn "org.jetbrains.kotlin.android\|kotlin_version" simple_live_tv_app/android
+          grep -RIn "org.jetbrains.kotlin.android.*$KOTLIN_VERSION\|kotlin_version.*$KOTLIN_VERSION" simple_live_tv_app/android
+          grep -RIn "kotlinOptions\|compilerOptions\|JvmTarget" simple_live_tv_app/android/app || true
+
+      - name: Restore packages
         working-directory: simple_live_tv_app
         run: flutter pub get
 
-      - name: Build TV APK
+      - name: Build debug APK
         working-directory: simple_live_tv_app
-        run: flutter build apk --${{ inputs.build_mode }} --split-per-abi --no-pub
+        run: flutter build apk --debug --split-per-abi --no-pub
 
-      - name: List TV APK output
-        if: always()
+      - name: Collect Android TV APK
         run: |
-          ls -al simple_live_tv_app/build/app/outputs/flutter-apk/ || true
-          find simple_live_tv_app/build -name "*.apk" -print
+          mkdir -p artifacts/android-tv
+          cp simple_live_tv_app/build/app/outputs/flutter-apk/*.apk artifacts/android-tv/
+          ls -la artifacts/android-tv
 
       - name: Upload Android TV APK
-        if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: android-tv-${{ inputs.build_mode }}
-          path: simple_live_tv_app/build/app/outputs/flutter-apk/*.apk
+          name: android-tv-apk
+          path: artifacts/android-tv/
           if-no-files-found: error
-          retention-days: 14
 
-  # =========================================================================
-  # Windows portable
-  # =========================================================================
   windows:
     if: ${{ inputs.build_windows }}
-    name: Windows portable
+    name: Windows portable package
     runs-on: windows-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: "3.38.x"
           cache: true
 
       - name: Enable Windows desktop
@@ -221,60 +299,40 @@ jobs:
 
       - name: Build Windows
         working-directory: simple_live_app
-        run: flutter build windows --${{ inputs.build_mode }}
+        run: flutter build windows --release
 
-      - name: Package Windows portable zip
+      - name: Collect Windows package
         shell: pwsh
-        working-directory: simple_live_app
         run: |
-          $mode = "${{ inputs.build_mode }}"
-          $modeDir = (Get-Culture).TextInfo.ToTitleCase($mode)
-          $src = "build/windows/x64/runner/$modeDir"
-          if (-not (Test-Path $src)) {
-            Write-Host "Primary path $src not found, falling back to search..."
-            $src = (Get-ChildItem -Path build/windows -Recurse -Directory |
-                    Where-Object { $_.Name -in @('Release','Debug') } |
-                    Select-Object -First 1).FullName
-          }
-          if (-not $src) { throw "No Windows runner output directory found." }
-          Write-Host "Packaging from: $src"
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $zip = "dist/simple_live_app-windows-x64-$mode.zip"
-          Compress-Archive -Path "$src/*" -DestinationPath $zip -Force
-          Get-ChildItem dist
+          New-Item -ItemType Directory -Force -Path artifacts/windows-portable
+          Copy-Item -Recurse -Force simple_live_app/build/windows/x64/runner/Release/* artifacts/windows-portable/
+          Get-ChildItem artifacts/windows-portable
 
-      - name: Upload Windows artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v6
         with:
-          name: windows-${{ inputs.build_mode }}
-          path: simple_live_app/dist/*.zip
+          name: windows-portable
+          path: artifacts/windows-portable/
           if-no-files-found: error
-          retention-days: 14
 
-  # =========================================================================
-  # Linux portable
-  # =========================================================================
   linux:
     if: ${{ inputs.build_linux }}
-    name: Linux portable
+    name: Linux portable package
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: "3.38.x"
           cache: true
 
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev libasound2-dev libmpv-dev mpv
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev libmpv-dev mpv
 
       - name: Enable Linux desktop
         run: flutter config --enable-linux-desktop
@@ -285,34 +343,17 @@ jobs:
 
       - name: Build Linux
         working-directory: simple_live_app
-        run: flutter build linux --${{ inputs.build_mode }}
+        run: flutter build linux --release
 
-      - name: Package Linux portable tar.gz
-        working-directory: simple_live_app
-        env:
-          MODE: ${{ inputs.build_mode }}
+      - name: Collect Linux package
         run: |
-          set -euo pipefail
-          SRC="build/linux/x64/${MODE}/bundle"
-          if [ ! -d "$SRC" ]; then
-            echo "Primary path $SRC not found, falling back to search..."
-            SRC="$(find build/linux -type d -name bundle | head -n1)"
-          fi
-          if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
-            echo "No Linux bundle directory found." >&2
-            exit 1
-          fi
-          echo "Packaging from: $SRC"
-          mkdir -p dist
-          tar -czf "dist/simple_live_app-linux-x64-${MODE}.tar.gz" \
-              -C "$(dirname "$SRC")" "$(basename "$SRC")"
-          ls -al dist
+          mkdir -p artifacts/linux-portable
+          cp -a simple_live_app/build/linux/x64/release/bundle/. artifacts/linux-portable/
+          ls -la artifacts/linux-portable
 
-      - name: Upload Linux artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v6
         with:
-          name: linux-${{ inputs.build_mode }}
-          path: simple_live_app/dist/*.tar.gz
+          name: linux-portable
+          path: artifacts/linux-portable/
           if-no-files-found: error
-          retention-days: 14
