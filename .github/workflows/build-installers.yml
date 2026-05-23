@@ -78,6 +78,15 @@ jobs:
           echo "Kotlin plugin lines after patch:"
           grep -RIn "org.jetbrains.kotlin.android\|kotlin_version" simple_live_app/android
           grep -RIn "org.jetbrains.kotlin.android.*$KOTLIN_VERSION\|kotlin_version.*$KOTLIN_VERSION" simple_live_app/android
+          for file in simple_live_app/android/app/build.gradle simple_live_app/android/app/build.gradle.kts; do
+            if [ -f "$file" ]; then
+              perl -0pi -e 's/\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*JavaVersion\.VERSION_11\.toString\(\)\s*\}//g' "$file"
+              if ! grep -q "org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11" "$file"; then
+                printf '\nkotlin {\n    compilerOptions {\n        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)\n    }\n}\n' >> "$file"
+              fi
+              grep -n "kotlinOptions\|compilerOptions\|JvmTarget" "$file" || true
+            fi
+          done
 
       - name: Restore packages
         working-directory: simple_live_app
@@ -89,145 +98,3 @@ jobs:
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
-        with:
-          name: android-phone-apk
-          path: simple_live_app/build/app/outputs/flutter-apk/*.apk
-          if-no-files-found: error
-
-  android-tv:
-    if: ${{ inputs.build_android_tv }}
-    name: Android TV APK
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: "17"
-          cache: gradle
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.38.x"
-          cache: true
-
-      - name: Create temporary Android TV signing files
-        run: |
-          keytool -genkeypair -v \
-            -keystore simple_live_tv_app/android/debug.keystore \
-            -storepass android \
-            -keypass android \
-            -alias androiddebugkey \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
-          {
-            echo "storeFile=$GITHUB_WORKSPACE/simple_live_tv_app/android/debug.keystore"
-            echo "storePassword=android"
-            echo "keyPassword=android"
-            echo "keyAlias=androiddebugkey"
-          } > simple_live_tv_app/android/key.properties
-
-      - name: Align Android TV Kotlin version
-        run: |
-          set -euo pipefail
-          for file in simple_live_tv_app/android/settings.gradle simple_live_tv_app/android/settings.gradle.kts simple_live_tv_app/android/build.gradle simple_live_tv_app/android/build.gradle.kts; do
-            if [ -f "$file" ]; then
-              perl -0pi -e "s/id\\(\"org\\.jetbrains\\.kotlin\\.android\"\\)\\s+version\\s+\"[^\"]+\"/id(\"org.jetbrains.kotlin.android\") version \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
-              perl -0pi -e "s/id 'org\\.jetbrains\\.kotlin\\.android' version '[^']+'/id 'org.jetbrains.kotlin.android' version '\$ENV{KOTLIN_VERSION}'/g" "$file"
-              perl -0pi -e "s/id \"org\\.jetbrains\\.kotlin\\.android\" version \"[^\"]+\"/id \"org.jetbrains.kotlin.android\" version \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
-              perl -0pi -e "s/ext\\.kotlin_version\\s*=\\s*['\"][^'\"]+['\"]/ext.kotlin_version = \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
-            fi
-          done
-          echo "Kotlin plugin lines after patch:"
-          grep -RIn "org.jetbrains.kotlin.android\|kotlin_version" simple_live_tv_app/android
-          grep -RIn "org.jetbrains.kotlin.android.*$KOTLIN_VERSION\|kotlin_version.*$KOTLIN_VERSION" simple_live_tv_app/android
-
-      - name: Restore packages
-        working-directory: simple_live_tv_app
-        run: flutter pub get
-
-      - name: Build debug APK
-        working-directory: simple_live_tv_app
-        run: flutter build apk --debug --split-per-abi --no-pub
-
-      - name: Upload Android TV APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-tv-apk
-          path: simple_live_tv_app/build/app/outputs/flutter-apk/*.apk
-          if-no-files-found: error
-
-  windows:
-    if: ${{ inputs.build_windows }}
-    name: Windows portable package
-    runs-on: windows-latest
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.38.x"
-          cache: true
-
-      - name: Enable Windows desktop
-        run: flutter config --enable-windows-desktop
-
-      - name: Restore packages
-        working-directory: simple_live_app
-        run: flutter pub get
-
-      - name: Build Windows
-        working-directory: simple_live_app
-        run: flutter build windows --release
-
-      - name: Upload Windows package
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-portable
-          path: simple_live_app/build/windows/x64/runner/Release/**
-          if-no-files-found: error
-
-  linux:
-    if: ${{ inputs.build_linux }}
-    name: Linux portable package
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.38.x"
-          cache: true
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev libmpv-dev mpv
-
-      - name: Enable Linux desktop
-        run: flutter config --enable-linux-desktop
-
-      - name: Restore packages
-        working-directory: simple_live_app
-        run: flutter pub get
-
-      - name: Build Linux
-        working-directory: simple_live_app
-        run: flutter build linux --release
-
-      - name: Upload Linux package
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-portable
-          path: simple_live_app/build/linux/x64/release/bundle/**
-          if-no-files-found: error
