@@ -1,7 +1,5 @@
 name: Build installers
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  
+
 on:
   workflow_dispatch:
     inputs:
@@ -21,6 +19,9 @@ on:
         description: Build Linux portable package
         type: boolean
         default: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   android:
@@ -43,6 +44,24 @@ jobs:
         with:
           flutter-version: "3.38.x"
           cache: true
+
+      - name: Create temporary Android signing files
+        run: |
+          keytool -genkeypair -v \
+            -keystore simple_live_app/android/debug.keystore \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          {
+            echo "storeFile=$GITHUB_WORKSPACE/simple_live_app/android/debug.keystore"
+            echo "storePassword=android"
+            echo "keyPassword=android"
+            echo "keyAlias=androiddebugkey"
+          } > simple_live_app/android/key.properties
 
       - name: Restore packages
         working-directory: simple_live_app
@@ -79,6 +98,24 @@ jobs:
         with:
           flutter-version: "3.38.x"
           cache: true
+
+      - name: Create temporary Android TV signing files
+        run: |
+          keytool -genkeypair -v \
+            -keystore simple_live_tv_app/android/debug.keystore \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          {
+            echo "storeFile=$GITHUB_WORKSPACE/simple_live_tv_app/android/debug.keystore"
+            echo "storePassword=android"
+            echo "keyPassword=android"
+            echo "keyAlias=androiddebugkey"
+          } > simple_live_tv_app/android/key.properties
 
       - name: Restore packages
         working-directory: simple_live_tv_app
