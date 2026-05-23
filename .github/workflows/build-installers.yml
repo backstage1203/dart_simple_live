@@ -64,13 +64,28 @@ jobs:
             echo "keyAlias=androiddebugkey"
           } > simple_live_app/android/key.properties
 
+      - name: Align Android Kotlin version
+        run: |
+          set -euo pipefail
+          for file in simple_live_app/android/settings.gradle simple_live_app/android/settings.gradle.kts simple_live_app/android/build.gradle simple_live_app/android/build.gradle.kts; do
+            if [ -f "$file" ]; then
+              perl -0pi -e "s/id\\(\"org\\.jetbrains\\.kotlin\\.android\"\\)\\s+version\\s+\"[^\"]+\"/id(\"org.jetbrains.kotlin.android\") version \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
+              perl -0pi -e "s/id 'org\\.jetbrains\\.kotlin\\.android' version '[^']+'/id 'org.jetbrains.kotlin.android' version '\$ENV{KOTLIN_VERSION}'/g" "$file"
+              perl -0pi -e "s/id \"org\\.jetbrains\\.kotlin\\.android\" version \"[^\"]+\"/id \"org.jetbrains.kotlin.android\" version \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
+              perl -0pi -e "s/ext\\.kotlin_version\\s*=\\s*['\"][^'\"]+['\"]/ext.kotlin_version = \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
+            fi
+          done
+          echo "Kotlin plugin lines after patch:"
+          grep -RIn "org.jetbrains.kotlin.android\|kotlin_version" simple_live_app/android
+          grep -RIn "org.jetbrains.kotlin.android.*$KOTLIN_VERSION\|kotlin_version.*$KOTLIN_VERSION" simple_live_app/android
+
       - name: Restore packages
         working-directory: simple_live_app
         run: flutter pub get
 
       - name: Build debug APK
         working-directory: simple_live_app
-        run: flutter build apk --debug --split-per-abi
+        run: flutter build apk --debug --split-per-abi --no-pub
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
@@ -118,13 +133,28 @@ jobs:
             echo "keyAlias=androiddebugkey"
           } > simple_live_tv_app/android/key.properties
 
+      - name: Align Android TV Kotlin version
+        run: |
+          set -euo pipefail
+          for file in simple_live_tv_app/android/settings.gradle simple_live_tv_app/android/settings.gradle.kts simple_live_tv_app/android/build.gradle simple_live_tv_app/android/build.gradle.kts; do
+            if [ -f "$file" ]; then
+              perl -0pi -e "s/id\\(\"org\\.jetbrains\\.kotlin\\.android\"\\)\\s+version\\s+\"[^\"]+\"/id(\"org.jetbrains.kotlin.android\") version \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
+              perl -0pi -e "s/id 'org\\.jetbrains\\.kotlin\\.android' version '[^']+'/id 'org.jetbrains.kotlin.android' version '\$ENV{KOTLIN_VERSION}'/g" "$file"
+              perl -0pi -e "s/id \"org\\.jetbrains\\.kotlin\\.android\" version \"[^\"]+\"/id \"org.jetbrains.kotlin.android\" version \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
+              perl -0pi -e "s/ext\\.kotlin_version\\s*=\\s*['\"][^'\"]+['\"]/ext.kotlin_version = \"\$ENV{KOTLIN_VERSION}\"/g" "$file"
+            fi
+          done
+          echo "Kotlin plugin lines after patch:"
+          grep -RIn "org.jetbrains.kotlin.android\|kotlin_version" simple_live_tv_app/android
+          grep -RIn "org.jetbrains.kotlin.android.*$KOTLIN_VERSION\|kotlin_version.*$KOTLIN_VERSION" simple_live_tv_app/android
+
       - name: Restore packages
         working-directory: simple_live_tv_app
         run: flutter pub get
 
       - name: Build debug APK
         working-directory: simple_live_tv_app
-        run: flutter build apk --debug --split-per-abi
+        run: flutter build apk --debug --split-per-abi --no-pub
 
       - name: Upload Android TV APK
         uses: actions/upload-artifact@v4
